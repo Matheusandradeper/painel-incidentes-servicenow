@@ -2,7 +2,11 @@
 
 Dashboard interativo em Python para análise de chamados de TI, alimentado pela API REST (Table API) do ServiceNow. Projeto pessoal inspirado na rotina de suporte N2 em ambiente corporativo.
 
-<!-- Adicione aqui um print ou GIF do painel: ![Painel](docs/painel.gif) -->
+## 🖼️ Visão geral
+
+![Painel de Incidentes](docs/painel.png)
+
+> Captura com dados **sintéticos** (modo `--sintetico`): por isso o aviso azul no topo.
 
 ## 🚀 Funcionalidades
 - Coleta de incidentes via API REST do ServiceNow, com paginação e timeout.

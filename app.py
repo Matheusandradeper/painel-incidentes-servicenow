@@ -14,6 +14,9 @@ def carregar_dados():
     for coluna in ["opened_at", "resolved_at", "sla_due"]:
         df[coluna] = pd.to_datetime(df[coluna], errors="coerce")
 
+    # Padroniza o texto das categorias ("Hardware" e "hardware" viram uma só)
+    df["category"] = df["category"].str.strip().str.capitalize()
+
     # Colunas derivadas calculadas uma única vez
     df["data_abertura"] = df["opened_at"].dt.date
     df["hora_abertura"] = df["opened_at"].dt.hour
@@ -84,12 +87,14 @@ df_resolvidos = df_filtrado.dropna(subset=["tempo_resolucao_horas"])
 df_sla = df_resolvidos.dropna(subset=["sla_due", "resolved_at"])
 
 mttr = df_resolvidos["tempo_resolucao_horas"].mean() if not df_resolvidos.empty else 0
+mediana = df_resolvidos["tempo_resolucao_horas"].median() if not df_resolvidos.empty else 0
 taxa_sla = df_sla["sla_cumprido"].mean() * 100 if not df_sla.empty else 0
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total de Incidentes", len(df_filtrado))
-col2.metric("MTTR Médio", f"{mttr:.1f} horas")
-col3.metric("Cumprimento de SLA", f"{taxa_sla:.1f}%")
+col2.metric("MTTR Médio", f"{mttr:.1f} h")
+col3.metric("MTTR Mediano", f"{mediana:.1f} h")
+col4.metric("Cumprimento de SLA", f"{taxa_sla:.1f}%" if not df_sla.empty else "N/D")
 
 st.divider()
 
@@ -101,11 +106,10 @@ with col_esq:
     st.bar_chart(df_filtrado["category"].value_counts())
 
 with col_dir:
-    st.subheader("Incidentes ao Longo do Tempo")
-    por_dia = (
-        df_filtrado.set_index("opened_at").resample("D").size()  # dias sem incidente = 0
-    )
-    st.line_chart(por_dia)
+    dias = (df_filtrado["opened_at"].max() - df_filtrado["opened_at"].min()).days
+    freq, rotulo = ("D", "dia") if dias <= 90 else ("W", "semana") if dias <= 730 else ("MS", "mês")
+    st.subheader(f"Incidentes por {rotulo}")
+    st.line_chart(df_filtrado.set_index("opened_at").resample(freq).size())
 
 col_esq2, col_dir2 = st.columns(2)
 
