@@ -1,25 +1,53 @@
-# 📊 Painel de Incidentes - ServiceNow
+# 📊 Painel de Incidentes — ServiceNow
 
-Um dashboard interativo construído em Python para análise de chamados de TI, integrado à API REST do ServiceNow.
+Dashboard interativo em Python para análise de chamados de TI, alimentado pela API REST (Table API) do ServiceNow. Projeto pessoal inspirado na rotina de suporte N2 em ambiente corporativo.
+
+<!-- Adicione aqui um print ou GIF do painel: ![Painel](docs/painel.gif) -->
 
 ## 🚀 Funcionalidades
-- Conexão via API REST com instâncias do ServiceNow.
-- Tratamento de dados (limpeza de datas e categorias).
-- Cálculo de MTTR (Mean Time To Resolution).
-- Cálculo de cumprimento de SLA.
+- Coleta de incidentes via API REST do ServiceNow, com paginação e timeout.
+- Tratamento dos dados (datas, categorias vazias, prioridades).
+- Métricas: total de incidentes, **MTTR** e **cumprimento de SLA**.
+- Gráficos: incidentes por categoria, evolução diária, **horários de pico** e **SLA por categoria**.
+- Filtros por categoria, prioridade e período.
 - Interface interativa com Streamlit.
 
-## 🛠️ Tecnologias Utilizadas
-- Python 3
-- Streamlit (Interface)
-- Pandas (Análise de dados)
-- Requests (Requisições HTTP)
+## 🛠️ Tecnologias
+Python 3 · Streamlit · Pandas · NumPy · Requests
 
-## ⚙️ Como rodar o projeto localmente
-1. Clone o repositório.
-2. Crie um ambiente virtual: `python -m venv .venv`
-3. Ative o ambiente: `.venv\Scripts\Activate.ps1` (Windows)
-4. Instale as dependências: `pip install -r requirements.txt`
-5. Gere os dados (necessário ter credenciais do ServiceNow nas variáveis de ambiente):
-   `python gerar_dados.py`
-6. Rode o painel: `streamlit run app.py`
+## ⚙️ Como rodar
+
+### Opção 1 — Só ver o painel (sem credenciais)
+O repositório já inclui `dados_incidentes.csv`.
+```bash
+python -m venv .venv
+.venv\Scripts\Activate.ps1      # Windows (Linux/macOS: source .venv/bin/activate)
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+### Opção 2 — Gerar dados da sua própria instância
+Defina as variáveis de ambiente (use um PDI, nunca uma instância de produção):
+```powershell
+$env:SN_URL  = "https://devXXXXX.service-now.com"
+$env:SN_USER = "seu_usuario"
+$env:SN_PASS = "sua_senha"
+```
+Depois escolha o modo:
+```bash
+python gerar_dados.py              # tempos reais (resolved_at - opened_at)
+python gerar_dados.py --sintetico  # tempos simulados + SLA fixo de 48h
+```
+
+## 🧭 Decisões e limitações
+- **Dados sintéticos:** o PDI tem poucos incidentes resolvidos, então o modo `--sintetico` gera tempos de resolução aleatórios (seed fixa, ~20% de casos lentos) e define um SLA fixo de 48h. Nesse modo, **MTTR e SLA não representam dados reais**; o painel exibe um aviso quando isso acontece. No modo padrão, o tempo é calculado de `opened_at` e `resolved_at` e o prazo vem do campo `sla_due`.
+- **SLA:** em produção, prazos variam por prioridade e vêm da tabela `task_sla`. Este projeto usa o campo `sla_due` do incidente ou o valor fixo do modo sintético.
+- **Fuso horário:** o ServiceNow retorna datas em UTC; os horários de pico não são convertidos para o fuso local.
+- **Volume:** a coleta é limitada a 5.000 incidentes (`LIMITE_MAXIMO`).
+- **SSL:** a verificação de certificado fica ligada por padrão. `SN_VERIFY_SSL=false` existe só para ambientes de teste.
+- **Credenciais:** nunca versione senhas; use variáveis de ambiente. O `.gitignore` já ignora `.env`.
+
+## 🔭 Próximos passos
+- Prazo de SLA por prioridade via tabela `task_sla`.
+- Deploy no Streamlit Community Cloud.
+- Testes automatizados para o tratamento de dados.

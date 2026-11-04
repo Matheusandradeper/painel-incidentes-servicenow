@@ -1,72 +1,138 @@
-import streamlit as st
 import pandas as pd
-
+import streamlit as st
 
 st.set_page_config(page_title="Painel de Incidentes", layout="wide")
+
+ARQUIVO_DADOS = "dados_incidentes.csv"
 
 
 @st.cache_data
 def carregar_dados():
-    df = pd.read_csv('dados_incidentes.csv')
-    # Converter datas que voltaram como texto no CSV
-    df['opened_at'] = pd.to_datetime(df['opened_at'])
+    df = pd.read_csv(ARQUIVO_DADOS)
+
+    # Todas as colunas de data voltam como texto do CSV
+    for coluna in ["opened_at", "resolved_at", "sla_due"]:
+        df[coluna] = pd.to_datetime(df[coluna], errors="coerce")
+
+    # Colunas derivadas calculadas uma única vez
+    df["data_abertura"] = df["opened_at"].dt.date
+    df["hora_abertura"] = df["opened_at"].dt.hour
+    df["sla_cumprido"] = df["resolved_at"] <= df["sla_due"]
     return df
 
-df = carregar_dados()
 
+def mostrar_tabela(df):
+    try:
+        st.dataframe(df, width="stretch")
+    except TypeError:  # versões antigas do Streamlit
+        st.dataframe(df, use_container_width=True)
+
+
+try:
+    df = carregar_dados()
+except FileNotFoundError:
+    st.error(
+        f"Arquivo '{ARQUIVO_DADOS}' não encontrado. "
+        "Rode `python gerar_dados.py` (ou `--sintetico`) primeiro."
+    )
+    st.stop()
 
 st.title("📊 Painel de Incidentes — ServiceNow")
 st.markdown("Visão geral das métricas de suporte e SLA.")
 
+if "sintetico" in df.columns and df["sintetico"].any():
+    st.info(
+        "ℹ️ Tempos de resolução e SLA (48h) **simulados**: o PDI possui poucos "
+        "incidentes resolvidos. Veja a seção 'Decisões e limitações' no README."
+    )
 
+# ---------- Filtros ----------
 st.sidebar.header("Filtros")
-# Cria uma lista com as categorias únicas e adiciona a opção "Todas"
-lista_categorias = ["Todas"] + df['category'].dropna().unique().tolist()
-categoria_selecionada = st.sidebar.selectbox("Selecione a Categoria:", lista_categorias)
 
+categorias = ["Todas"] + sorted(df["category"].dropna().unique().tolist())
+categoria = st.sidebar.selectbox("Categoria:", categorias)
 
-if categoria_selecionada != "Todas":
-    df_filtrado = df[df['category'] == categoria_selecionada]
-else:
-    df_filtrado = df
+prioridades = ["Todas"] + sorted(df["priority"].dropna().unique().tolist())
+prioridade = st.sidebar.selectbox("Prioridade:", prioridades)
 
+data_min, data_max = df["data_abertura"].min(), df["data_abertura"].max()
+periodo = st.sidebar.date_input(
+    "Período de abertura:",
+    value=(data_min, data_max),
+    min_value=data_min,
+    max_value=data_max,
+)
+if not isinstance(periodo, (tuple, list)) or len(periodo) != 2:
+    st.sidebar.info("Selecione a data inicial e a final.")
+    st.stop()
+inicio, fim = periodo
 
-df_resolvidos = df_filtrado.dropna(subset=['tempo_resolucao_horas'])
+filtro = (df["data_abertura"] >= inicio) & (df["data_abertura"] <= fim)
+if categoria != "Todas":
+    filtro &= df["category"] == categoria
+if prioridade != "Todas":
+    filtro &= df["priority"] == prioridade
 
-if not df_resolvidos.empty:
-    mttr = df_resolvidos['tempo_resolucao_horas'].mean()
-    
-    df_sla = df_resolvidos.dropna(subset=['sla_due'])
-    df_sla['sla_cumprido'] = df_sla['resolved_at'] <= df_sla['sla_due']
-    taxa_sla = (df_sla['sla_cumprido'].sum() / len(df_sla)) * 100 if len(df_sla) > 0 else 0
-else:
-    mttr = 0
-    taxa_sla = 0
+df_filtrado = df[filtro].copy()
 
+if df_filtrado.empty:
+    st.warning("Nenhum incidente encontrado com esses filtros.")
+    st.stop()
+
+# ---------- Métricas ----------
+df_resolvidos = df_filtrado.dropna(subset=["tempo_resolucao_horas"])
+df_sla = df_resolvidos.dropna(subset=["sla_due", "resolved_at"])
+
+mttr = df_resolvidos["tempo_resolucao_horas"].mean() if not df_resolvidos.empty else 0
+taxa_sla = df_sla["sla_cumprido"].mean() * 100 if not df_sla.empty else 0
 
 col1, col2, col3 = st.columns(3)
 col1.metric("Total de Incidentes", len(df_filtrado))
 col2.metric("MTTR Médio", f"{mttr:.1f} horas")
 col3.metric("Cumprimento de SLA", f"{taxa_sla:.1f}%")
 
-st.divider() # Linha divisória visual
+st.divider()
 
+# ---------- Gráficos ----------
+col_esq, col_dir = st.columns(2)
 
-col_esquerda, col_direita = st.columns(2)
-
-with col_esquerda:
+with col_esq:
     st.subheader("Incidentes por Categoria")
-    # Conta quantos incidentes tem em cada categoria e plota
-    dados_categoria = df_filtrado['category'].value_counts()
-    st.bar_chart(dados_categoria)
+    st.bar_chart(df_filtrado["category"].value_counts())
 
-with col_direita:
+with col_dir:
     st.subheader("Incidentes ao Longo do Tempo")
-    # Agrupa os incidentes por data de abertura (apenas o dia) e conta
-    df_filtrado['data_abertura'] = df_filtrado['opened_at'].dt.date
-    dados_tempo = df_filtrado.groupby('data_abertura').size()
-    st.line_chart(dados_tempo)
+    por_dia = (
+        df_filtrado.set_index("opened_at").resample("D").size()  # dias sem incidente = 0
+    )
+    st.line_chart(por_dia)
 
+col_esq2, col_dir2 = st.columns(2)
 
+with col_esq2:
+    st.subheader("Horários de Pico (abertura)")
+    por_hora = df_filtrado["hora_abertura"].value_counts().reindex(range(24), fill_value=0)
+    st.bar_chart(por_hora)
+
+with col_dir2:
+    st.subheader("Cumprimento de SLA por Categoria (%)")
+    if df_sla.empty:
+        st.caption("Sem incidentes resolvidos com SLA para este filtro.")
+    else:
+        sla_categoria = df_sla.groupby("category")["sla_cumprido"].mean() * 100
+        st.bar_chart(sla_categoria)
+
+# ---------- Tabela ----------
 st.subheader("Detalhamento dos Incidentes")
-st.dataframe(df_filtrado[['number', 'category', 'opened_at', 'resolved_at', 'tempo_resolucao_horas']], use_container_width=True)
+mostrar_tabela(
+    df_filtrado[
+        [
+            "number",
+            "category",
+            "priority",
+            "opened_at",
+            "resolved_at",
+            "tempo_resolucao_horas",
+        ]
+    ]
+)
